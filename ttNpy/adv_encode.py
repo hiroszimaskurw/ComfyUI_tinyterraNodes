@@ -16,6 +16,12 @@ except:
     FluxClipModel = None
     pass
 
+try:
+    from comfy.sd1_clip import SD1ClipModel
+except:
+    SD1ClipModel = None
+    pass
+
 def _grouper(n, iterable):
     it = iter(iterable)
     while True:
@@ -368,12 +374,54 @@ def advanced_encode(clip, text, token_normalization, weight_interpretation, w_ma
             return_pooled=True,
             apply_to_pooled=apply_to_pooled
         )
+    elif SD1ClipModel and isinstance(clip.cond_stage_model, SD1ClipModel):
+        # Handle SD1ClipModel variants (including ZImageTEModel with qwen3_4b, etc.)
+        clip_name = getattr(clip.cond_stage_model, 'clip_name', 'l')
+        if clip_name in tokenized:
+            return advanced_encode_from_tokens(
+                tokenized[clip_name],
+                token_normalization,
+                weight_interpretation,
+                lambda x: (clip.encode_from_tokens({clip_name: x}), None),
+                w_max=w_max,
+                return_pooled=True,
+                apply_to_pooled=apply_to_pooled
+            )
+        else:
+            # Fallback: use first available key
+            available_key = next(iter(tokenized.keys()), 'l')
+            return advanced_encode_from_tokens(
+                tokenized[available_key],
+                token_normalization,
+                weight_interpretation,
+                lambda x: (clip.encode_from_tokens({available_key: x}), None),
+                w_max=w_max,
+                return_pooled=True,
+                apply_to_pooled=apply_to_pooled
+            )
     else:
-        return advanced_encode_from_tokens(tokenized['l'],
-                                           token_normalization, 
-                                           weight_interpretation, 
-                                           lambda x: (clip.encode_from_tokens({'l': x}), None),
-                                           w_max=w_max)
+        # Fallback for unknown models - try 'l' first, otherwise use first available key
+        if 'l' in tokenized:
+            return advanced_encode_from_tokens(tokenized['l'],
+                                               token_normalization, 
+                                               weight_interpretation, 
+                                               lambda x: (clip.encode_from_tokens({'l': x}), None),
+                                               w_max=w_max)
+        else:
+            # Use first available key from tokenized dict
+            available_key = next(iter(tokenized.keys()), None)
+            if available_key is not None:
+                return advanced_encode_from_tokens(
+                    tokenized[available_key],
+                    token_normalization,
+                    weight_interpretation,
+                    lambda x: (clip.encode_from_tokens({available_key: x}), None),
+                    w_max=w_max,
+                    return_pooled=True,
+                    apply_to_pooled=apply_to_pooled
+                )
+            else:
+                raise ValueError("No valid tokenized keys found for encoding")
 
 def advanced_encode_XL(clip, text1, text2, token_normalization, weight_interpretation, w_max=1.0, clip_balance=.5, apply_to_pooled=True):
     tokenized1 = clip.tokenize(text1, return_word_ids=True)
